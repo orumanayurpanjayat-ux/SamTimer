@@ -1,0 +1,79 @@
+name: Build SamTimer APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Fix: v4.0.2+ no longer installs the removed 'tools' package.
+      # packages: "" is kept explicit for clarity.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
+
+      - name: Set up NDK r27c
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+          add-to-path: false
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Fix: Remove the hardcoded, machine-specific JDK path from the repo's
+      # gradle.properties before Gradle reads it.
+      - name: Remove hardcoded JDK path from gradle.properties
+        run: sed -i '/org.gradle.java.home/d' gradle.properties
+
+      # Upgrade: setup-gradle@v6 uses the enhanced cache provider by default.
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build debug APK
+        env:
+          # README: Gradle resolves the NDK from this variable first.
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        # Fix: -Dorg.gradle.java.home ensures Gradle ignores any invalid
+        # property and uses the JDK provisioned by actions/setup-java.
+        run: ./gradlew assembleDebug -Dorg.gradle.java.home="$JAVA_HOME" --stacktrace --no-daemon
+
+      - name: Upload APK
+        # Note: actions/upload-artifact@v4 is stable. When a deprecation
+        # warning appears, upgrade to v5 first, then evaluate v6 (which
+        # requires Actions Runner 2.327.1+).
+        uses: actions/upload-artifact@v4
+        with:
+          name: SamTimer-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload build reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: |
+            **/build/reports/**
+            **/build/outputs/logs/**
+          if-no-files-found: ignore
